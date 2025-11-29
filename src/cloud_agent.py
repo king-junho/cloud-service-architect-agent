@@ -38,6 +38,42 @@ AWS_PATTERNS = [
             "Lambda 콜드 스타트로 인한 지연 가능성",
             "복잡한 장기 실행 워크로드에는 부적합",
         ],
+        "iac_snippets": {
+            # 정적 웹(S3) + NoSQL(DynamoDB) 중심의 최소 예시
+            "cloudformation_yaml": """Resources:
+  AppBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${AWS::StackName}-static-site"
+
+  AppTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-data"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+""",
+            "terraform_hcl": """resource "aws_s3_bucket" "app_bucket" {
+  bucket = "${var.project_name}-static-site"
+}
+
+resource "aws_dynamodb_table" "app_table" {
+  name         = "${var.project_name}-data"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "id"
+
+  attribute {
+    name = "id"
+    type = "S"
+  }
+}
+""",
+        },
     },
     {
         "id": "classic_3tier",
@@ -58,6 +94,95 @@ AWS_PATTERNS = [
             "EC2 인스턴스 운영/패치 부담",
             "서버리스 대비 기본 비용이 높을 수 있음",
         ],
+        "iac_snippets": {
+            # 매우 단순화된 3-Tier 구조 예시 (VPC/ALB/EC2/RDS 스켈레톤)
+            "cloudformation_yaml": """Resources:
+  AppVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+
+  AppSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref AppVPC
+      CidrBlock: 10.0.1.0/24
+
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTP
+      VpcId: !Ref AppVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
+  AppLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Subnets:
+        - !Ref AppSubnet
+      SecurityGroups:
+        - !Ref AppSecurityGroup
+
+  AppDB:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      Engine: mysql
+      DBInstanceClass: db.t3.micro
+      AllocatedStorage: 20
+      MasterUsername: admin
+      MasterUserPassword: ExamplePassw0rd
+""",
+            "terraform_hcl": """resource "aws_vpc" "app_vpc" {
+  cidr_block = "10.0.0.0/16"
+}
+
+resource "aws_subnet" "app_subnet" {
+  vpc_id     = aws_vpc.app_vpc.id
+  cidr_block = "10.0.1.0/24"
+}
+
+resource "aws_security_group" "app_sg" {
+  name        = "app-sg"
+  description = "Allow HTTP"
+  vpc_id      = aws_vpc.app_vpc.id
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_lb" "app_lb" {
+  name               = "app-lb"
+  load_balancer_type = "application"
+  subnets            = [aws_subnet.app_subnet.id]
+  security_groups    = [aws_security_group.app_sg.id]
+}
+
+resource "aws_db_instance" "app_db" {
+  engine               = "mysql"
+  instance_class       = "db.t3.micro"
+  allocated_storage    = 20
+  name                 = "appdb"
+  username             = "admin"
+  password             = "ExamplePassw0rd"
+  skip_final_snapshot  = true
+}
+""",
+        },
     },
     {
         "id": "batch_analytics_pipeline",
@@ -77,9 +202,43 @@ AWS_PATTERNS = [
             "실시간 스트리밍 처리에는 부적합",
             "잘못된 스키마/파티션 설계 시 쿼리 비용 증가 가능",
         ],
+        "iac_snippets": {
+            # S3 데이터 레이크 + Glue DB + Athena 워크그룹 정도의 기본 골격
+            "cloudformation_yaml": """Resources:
+  RawDataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${AWS::StackName}-raw-data"
+
+  GlueDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: !Sub "${AWS::StackName}_db"
+
+  AthenaWorkGroup:
+    Type: AWS::Athena::WorkGroup
+    Properties:
+      Name: !Sub "${AWS::StackName}_wg"
+      State: ENABLED
+""",
+            "terraform_hcl": """resource "aws_s3_bucket" "raw_data" {
+  bucket = "${var.project_name}-raw-data"
+}
+
+resource "aws_glue_catalog_database" "db" {
+  name = "${var.project_name}_db"
+}
+
+resource "aws_athena_workgroup" "wg" {
+  name = "${var.project_name}_wg"
+  state = "ENABLED"
+}
+""",
+        },
     },
 ]
-
 # ─────────────────────────────────────────────
 # 2. 시스템 프롬프트 (과제용, 짧고 안정적으로)
 # ─────────────────────────────────────────────
@@ -194,6 +353,37 @@ ARCH_RECOMMENDATION_SYSTEM_PROMPT = """
 - iac_snippets는 선택 사항이지만, 가능하다면 간단한 스켈레톤을 제공하세요.
 - JSON 바깥에 다른 텍스트는 쓰지 마세요.
 """
+IAC_GENERATOR_SYSTEM_PROMPT = """
+당신은 AWS 인프라를 코드(IaC)로 작성해 주는 도우미입니다.
+
+입력으로는:
+1) 사용자의 요구사항 JSON (requirements)
+2) 선택된 아키텍처 패턴 정보 (selected_pattern_id, selected_pattern_name)
+3) 사용 서비스 목록 및 역할 (services_detail)
+
+이 정보들을 보고,
+- 해당 아키텍처를 대략적으로 구현할 수 있는
+  CloudFormation(YAML) 스니펫과
+  Terraform(HCL) 스니펫을 생성하세요.
+
+제약 사항:
+- 과제/데모용이므로, 모든 리소스를 완벽하게 생성할 필요는 없습니다.
+- 핵심 리소스 몇 개(S3, DynamoDB, VPC, RDS 등) 위주로 작성하세요.
+- 비밀번호나 민감한 값은 하드코딩하지 말고 예시 값 또는 TODO 주석을 사용하세요.
+- 템플릿은 실제로 CloudFormation/Terraform 문법과 최대한 호환되도록 작성하세요.
+- 너무 길어지지 않도록 최소한의 리소스만 포함하세요.
+
+출력 형식(JSON만, 설명 없이):
+
+{
+  "cloudformation_yaml": "여기에 YAML 문자열",
+  "terraform_hcl": "여기에 HCL 문자열"
+}
+
+중요:
+- JSON 바깥에 다른 텍스트를 출력하지 마세요.
+- 코드 블록 마크다운(```yaml 같은 것)은 사용하지 마세요.
+"""
 
 
 # ─────────────────────────────────────────────
@@ -271,16 +461,21 @@ def create_agents() -> tuple[Agent, Agent]:
     requirements_agent = Agent(
         model="us.amazon.nova-lite-v1:0",
         system_prompt=REQUIREMENTS_ANALYSIS_SYSTEM_PROMPT,
-        tools=[],  # 과제 버전: 툴 사용 없이 프롬프트만으로 구조화
+        tools=[],
     )
 
     arch_agent = Agent(
         model="us.amazon.nova-lite-v1:0",
         system_prompt=ARCH_RECOMMENDATION_SYSTEM_PROMPT,
-        tools=[],  # 과제 버전: 툴 사용 없이 패턴을 입력으로 직접 전달
+        tools=[],
+    )
+    iac_agent = Agent(
+        model="us.amazon.nova-lite-v1:0",
+        system_prompt=IAC_GENERATOR_SYSTEM_PROMPT,
+        tools=[],
     )
 
-    return requirements_agent, arch_agent
+    return requirements_agent, arch_agent, iac_agent
 
 
 # ─────────────────────────────────────────────
@@ -391,11 +586,32 @@ def pretty_print_architecture(arch_result: dict) -> None:
             print(f"  {tradeoffs}")
 
 
+def generate_iac_from_architecture(
+    iac_agent: Agent,
+    requirements: dict,
+    arch_result: dict,
+) -> dict:
+    """요구사항 + 선택된 아키텍처를 기반으로 LLM에게 IaC 템플릿 생성을 부탁한다."""
+    payload = {
+        "requirements": requirements,
+        "selected_pattern_id": arch_result.get("selected_pattern_id"),
+        "selected_pattern_name": arch_result.get("selected_pattern_name"),
+        "services_detail": arch_result.get("services_detail", []),
+    }
+
+    user_message = json.dumps(payload, ensure_ascii=False, indent=2)
+    raw_response = iac_agent(user_message)
+    data, is_error = safe_parse_json(raw_response)
+    if is_error:
+        data["parse_error"] = True
+    return data
+
+
 # ─────────────────────────────────────────────
 # 9. main() – 논문 에이전트 스타일 CLI 루프
 # ─────────────────────────────────────────────
 def main():
-    requirements_agent, arch_agent = create_agents()
+    requirements_agent, arch_agent, iac_agent = create_agents()
 
     print(
         "클라우드 서비스 추천 에이전트를 시작합니다.\n"
@@ -480,6 +696,23 @@ def main():
                 print(arch_result.get("raw_response"))
                 print()
                 continue
+
+            # 2.5단계: IaC 자동 생성 (여기로 당겨오기)
+            print(
+                "\n[IaC] 선택된 아키텍처 기반으로 CloudFormation/Terraform 예시 생성 중...\n"
+            )
+            iac_result = generate_iac_from_architecture(
+                iac_agent, requirements, arch_result
+            )
+
+            if not iac_result.get("parse_error"):
+                arch_result["iac_snippets"] = {
+                    "cloudformation_yaml": iac_result.get("cloudformation_yaml", ""),
+                    "terraform_hcl": iac_result.get("terraform_hcl", ""),
+                }
+            else:
+                print("⚠️ IaC JSON 파싱에 실패했습니다. 원본 응답:")
+                print(iac_result.get("raw_response"))
 
             # RAW JSON 출력 (보고서용)
             print(
