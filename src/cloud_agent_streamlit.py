@@ -1,21 +1,50 @@
-import streamlit as st
+# src/cloud_agent_streamlit.py
+
 import json
+import io
+import streamlit as st
 
 from cloud_agent import (
     create_agents,
     analyze_requirements,
     recommend_architecture,
 )
+from aws_patterns import AWS_PATTERNS  # 패턴 메타데이터(비용/비교용)
 
+# ─────────────────────────────────────────────────────────────
+# 0. (발표용) boto3 자동 배포 데모 코드 문자열
+# ─────────────────────────────────────────────────────────────
+BOTO3_DEPLOY_EXAMPLE = """\
+import boto3
+
+def deploy_small_serverless_web(project_name: str, region: str = "ap-northeast-2"):
+    \"\"\"데모용: 소규모 서버리스 웹 아키텍처의 일부를 실제 AWS에 생성하는 예시 코드입니다.
+    실제로 실행할 때는 IAM 권한과 과금, 삭제 전략을 반드시 확인해야 합니다.
+    \"\"\"
+    s3 = boto3.client("s3", region_name=region)
+    bucket_name = f"{project_name}-static-site"
+
+    # 1) S3 버킷 생성
+    s3.create_bucket(
+        Bucket=bucket_name,
+        CreateBucketConfiguration={"LocationConstraint": region},
+    )
+
+    # TODO: 2) 정적 웹 호스팅 설정, 3) CloudFront, API Gateway, Lambda, DynamoDB 등
+    # 추가 리소스 생성 로직을 여기에 작성
+
+    return {"bucket_name": bucket_name}
+"""
+
+# ─────────────────────────────────────────────────────────────
+# 1. 페이지 설정 & 세션 상태
+# ─────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="클라우드 서비스 추천 Agent",
     page_icon="☁️",
     layout="wide",
 )
 
-# ─────────────────────────────────────────────────────────────
-# 1. 초기화 및 세션 상태 관리
-# ─────────────────────────────────────────────────────────────
 if "agents" not in st.session_state:
     st.session_state.agents = create_agents()
 if "requirements" not in st.session_state:
@@ -26,30 +55,34 @@ if "followup_answers" not in st.session_state:
     st.session_state.followup_answers = {}
 if "arch_result" not in st.session_state:
     st.session_state.arch_result = None
+if "input_text" not in st.session_state:
+    st.session_state.input_text = ""
 
-# [수정됨] 반환값이 3개이므로 _(언더바)로 세 번째 값(iac_agent)을 받아 무시 처리
+# cloud_agent.create_agents()가 (requirements_agent, arch_agent, iac_agent) 를 리턴하므로
 requirements_agent, arch_agent, _ = st.session_state.agents
 
 # ─────────────────────────────────────────────────────────────
-# 2. 메인 UI 헤더
+# 2. 헤더
 # ─────────────────────────────────────────────────────────────
 st.title("☁️ 클라우드 아키텍처 설계 에이전트")
-st.markdown("""
-이 에이전트는 사용자의 **자연어 설명**을 분석하여, 
-가장 적합한 **AWS 아키텍처 패턴**을 추천하고 **IaC 코드(Terraform/CloudFormation)** 까지 생성해 줍니다.
-""")
+st.markdown(
+    """
+이 에이전트는 사용자의 **자연어 설명**을 분석하여,  
+가장 적합한 **AWS 아키텍처 패턴**을 추천하고  
+필요 시 **IaC 코드(Terraform / CloudFormation)** 예시까지 제공합니다.
+"""
+)
 st.divider()
 
 # ─────────────────────────────────────────────────────────────
-# 3. 2단 컬럼 레이아웃 (왼쪽: 입력 / 오른쪽: 결과)
+# 3. 2단 레이아웃
 # ─────────────────────────────────────────────────────────────
 col_left, col_right = st.columns([1, 1.2], gap="large")
 
-# === [왼쪽 컬럼] 입력 및 분석 단계 ===
+# === [왼쪽] 요구사항 입력 & 분석 ===
 with col_left:
     st.header("📝 1. 서비스 요구사항 입력")
-    
-    # 예시 선택 프리셋
+
     preset = st.selectbox(
         "💡 예시 시나리오 선택 (직접 입력 가능)",
         (
@@ -60,60 +93,85 @@ with col_left:
         ),
     )
 
-    if "input_text" not in st.session_state:
-        st.session_state.input_text = ""
-
     # 프리셋 선택 시 텍스트 자동 채움
     if preset != "직접 작성":
         if preset == "대학생 동아리용 소규모 게시판 (비용 민감)":
-            st.session_state.input_text = "동아리원 50명 정도가 쓸 게시판이야. 돈이 거의 안 들었으면 좋겠고 관리하기도 귀찮아."
+            st.session_state.input_text = (
+                "동아리원 50명 정도가 쓸 게시판이야. "
+                "돈이 거의 안 들었으면 좋겠고 관리하기도 귀찮아."
+            )
         elif preset == "트래픽이 급증하는 티켓 예매 사이트":
-            st.session_state.input_text = "유명 가수 콘서트 티켓팅 사이트야. 평소엔 조용한데 오픈 1분 만에 10만 명이 몰릴 수 있어. 절대 죽으면 안 돼."
+            st.session_state.input_text = (
+                "유명 가수 콘서트 티켓팅 사이트야. "
+                "평소엔 조용한데 오픈 1분 만에 10만 명이 몰릴 수 있어. 절대 죽으면 안 돼."
+            )
         elif preset == "매일 밤 로그를 분석하는 데이터 파이프라인":
-            st.session_state.input_text = "서버 로그가 S3에 쌓이는데, 이걸 매일 밤 12시에 한 번씩 분석해서 리포트를 만들고 싶어."
-    
+            st.session_state.input_text = (
+                "서버 로그가 S3에 쌓이는데, "
+                "이걸 매일 밤 12시에 한 번씩 분석해서 리포트를 만들고 싶어."
+            )
+    else:
+        # 직접 작성 모드일 때는 기존 입력 유지
+        if not st.session_state.input_text:
+            st.session_state.input_text = ""
+
     desc = st.text_area(
         "만들고 싶은 서비스를 자유롭게 설명해주세요:",
         value=st.session_state.input_text,
         height=150,
-        placeholder="예: 강아지 산책 친구를 구하는 앱을 만들고 싶어. 위치 기반 기능이 필요하고..."
+        placeholder="예: 강아지 산책 친구를 구하는 앱을 만들고 싶어. 위치 기반 기능이 필요하고...",
     )
 
-    # [분석 버튼]
+    # [요구사항 분석 버튼]
     if st.button("🔍 요구사항 분석 시작", use_container_width=True):
         if not desc.strip():
             st.warning("내용을 입력해주세요.")
         else:
-            with st.status("🤖 요구사항을 분석하고 있습니다...", expanded=True) as status:
+            with st.status(
+                "🤖 요구사항을 분석하고 있습니다...", expanded=True
+            ) as status:
                 req_result = analyze_requirements(requirements_agent, desc)
                 if req_result.get("parse_error"):
                     status.update(label="분석 실패", state="error")
                     st.error("JSON 파싱 오류가 발생했습니다.")
                 else:
                     st.session_state.requirements = req_result.get("requirements", {})
-                    st.session_state.followup_questions = req_result.get("followup_questions", [])
+                    st.session_state.followup_questions = req_result.get(
+                        "followup_questions", []
+                    )
                     st.session_state.followup_answers = {}
-                    st.session_state.arch_result = None # 결과 초기화
+                    st.session_state.arch_result = None
                     status.update(label="분석 완료!", state="complete")
 
-    # [추가 질문 섹션]
+    # 분석 결과 / 추가 질문
     if st.session_state.requirements:
         st.divider()
         st.subheader("✅ 분석된 핵심 요구사항")
         st.json(st.session_state.requirements, expanded=False)
 
         if st.session_state.followup_questions:
-            st.info("더 정확한 추천을 위해 아래 질문에 답변해 주시면 좋습니다. (선택사항)")
+            st.info(
+                "더 정확한 추천을 위해 아래 질문에 답변해 주시면 좋습니다. (선택사항)"
+            )
             with st.form("followup_form"):
                 new_answers = {}
-                for idx, q in enumerate(st.session_state.followup_questions, start=1):
-                    key = f"Q{idx}"
-                    ans = st.text_input(f"Q{idx}. {q}")
+                last_question = None
+                q_index = 1
+
+                # 같은 질문이 두 번 들어오는 LLM 버그 방어
+                for q in st.session_state.followup_questions:
+                    if q == last_question:
+                        continue
+                    key = f"Q{q_index}"
+                    ans = st.text_input(f"Q{q_index}. {q}")
                     new_answers[key] = {"question": q, "answer": ans}
-                
-                if st.form_submit_button("답변 적용 및 아키텍처 생성 🚀", use_container_width=True):
+                    last_question = q
+                    q_index += 1
+
+                if st.form_submit_button(
+                    "답변 적용 및 아키텍처 생성 🚀", use_container_width=True
+                ):
                     st.session_state.followup_answers = new_answers
-                    # 바로 아키텍처 생성 트리거
                     with st.spinner("최적의 아키텍처를 설계 중입니다..."):
                         arch_result = recommend_architecture(
                             arch_agent,
@@ -125,9 +183,9 @@ with col_left:
                     else:
                         st.session_state.arch_result = arch_result
         else:
-            # 추가 질문이 없는 경우 바로 생성 버튼 노출
+            # 추가 질문이 없으면 바로 아키텍처 생성 버튼
             if st.button("🚀 아키텍처 설계 실행", use_container_width=True):
-                 with st.spinner("최적의 아키텍처를 설계 중입니다..."):
+                with st.spinner("최적의 아키텍처를 설계 중입니다..."):
                     arch_result = recommend_architecture(
                         arch_agent,
                         st.session_state.requirements,
@@ -135,23 +193,31 @@ with col_left:
                     )
                     st.session_state.arch_result = arch_result
 
-# === [오른쪽 컬럼] 결과 출력 단계 ===
+# === [오른쪽] 아키텍처 결과 ===
 with col_right:
     st.header("🏗️ 2. 아키텍처 설계 결과")
 
-    if st.session_state.arch_result:
-        arch = st.session_state.arch_result
-        
-        # [수정됨] 탭 구조 개선 (요약 / 코드 / JSON)
-        tab1, tab2, tab3 = st.tabs(["📊 아키텍처 요약", "💻 IaC 코드 & 가이드", "⚙️ 원본 데이터"])
+    arch = st.session_state.arch_result
 
-        # --- 탭 1: 요약 ---
+    if arch:
+        # 탭: 요약 / IaC & 가이드 / JSON / 패턴 비교
+        tab1, tab2, tab3, tab4 = st.tabs(
+            [
+                "📊 아키텍처 요약",
+                "💻 IaC 코드 & 가이드",
+                "⚙️ 원본 데이터",
+                "📈 패턴 비교",
+            ]
+        )
+
+        # ─────────────────────────────────────
+        # 탭 1: 요약
+        # ─────────────────────────────────────
         with tab1:
-            # 패턴 이름 강조
             st.success(f"### 💡 추천 패턴: {arch.get('selected_pattern_name')}")
-            
+
             st.markdown("#### 📐 구조도 (Text Diagram)")
-            st.code(arch.get("architecture_diagram_text"), language="text")
+            st.code(arch.get("architecture_diagram_text", ""), language="text")
 
             st.markdown("#### 🛠️ 사용되는 핵심 서비스")
             services = arch.get("services_detail", [])
@@ -159,16 +225,15 @@ with col_right:
                 st.markdown(f"- **{s.get('service')}**: {s.get('role')}")
 
             st.markdown("---")
-            
-            # 이유 설명 (컬럼으로 분리)
-            r_col1, r_col2 = st.columns(2)
+
             reasoning = arch.get("reasoning", {})
-            
+            r_col1, r_col2 = st.columns(2)
+
             with r_col1:
                 st.markdown("##### 👍 장점 (Pros)")
                 for p in reasoning.get("pros", []):
                     st.write(f"✔️ {p}")
-            
+
             with r_col2:
                 st.markdown("##### ⚠️ 주의사항 (Cons)")
                 for c in reasoning.get("cons", []):
@@ -177,27 +242,95 @@ with col_right:
             if reasoning.get("fit_to_requirements"):
                 st.info(f"**선정 이유:** {reasoning.get('fit_to_requirements')}")
 
-        # --- 탭 2: IaC & 가이드 ---
+            # 🔹 비용 힌트 추가
+            selected_id = arch.get("selected_pattern_id")
+            cost_hint = None
+            if selected_id:
+                for p in AWS_PATTERNS:
+                    if p.get("id") == selected_id:
+                        cost_hint = p.get("cost_hint")
+                        break
+
+            st.markdown("---")
+            st.markdown("#### 💰 대략적인 비용 가이드")
+            if cost_hint:
+                st.write(f"- **예상 기본 비용 범위:** {cost_hint.get('monthly_base')}")
+                st.write("- **비용에 크게 영향을 주는 요소들:**")
+                for f in cost_hint.get("major_factors", []):
+                    st.write(f"  • {f}")
+            else:
+                st.write("이 패턴에 대한 비용 정보가 정의되어 있지 않습니다.")
+
+        # ─────────────────────────────────────
+        # 탭 2: IaC 코드 & 가이드
+        # ─────────────────────────────────────
         with tab2:
             st.subheader("💻 인프라 코드 (IaC)")
-            st.caption("이 코드를 복사해서 바로 인프라를 배포할 수 있습니다.")
-            
+            st.caption(
+                "이 코드를 복사하거나 파일로 내려받아 인프라를 배포할 수 있습니다."
+            )
+
             iac = arch.get("iac_snippets", {})
-            
-            # IaC 선택 라디오 버튼
-            iac_type = st.radio("포맷 선택", ["Terraform (HCL)", "CloudFormation (YAML)"], horizontal=True)
-            
+
+            iac_type = st.radio(
+                "포맷 선택",
+                ["Terraform (HCL)", "CloudFormation (YAML)"],
+                horizontal=True,
+            )
+
             if iac_type == "Terraform (HCL)":
-                code = iac.get("terraform_hcl", "# Terraform 코드가 생성되지 않았습니다.")
+                code = iac.get(
+                    "terraform_hcl", "# Terraform 코드가 생성되지 않았습니다."
+                )
                 st.code(code, language="hcl")
             else:
-                code = iac.get("cloudformation_yaml", "# CloudFormation 코드가 생성되지 않았습니다.")
+                code = iac.get(
+                    "cloudformation_yaml",
+                    "# CloudFormation 코드가 생성되지 않았습니다.",
+                )
                 st.code(code, language="yaml")
+
+            # 🔹 IaC 파일 다운로드 버튼
+            st.markdown("##### 📥 IaC 파일로 다운로드")
+            tf_code = iac.get("terraform_hcl", "")
+            cf_code = iac.get("cloudformation_yaml", "")
+
+            dl_col1, dl_col2 = st.columns(2)
+            with dl_col1:
+                if tf_code:
+                    st.download_button(
+                        "Terraform(main.tf) 다운로드",
+                        data=tf_code.encode("utf-8"),
+                        file_name="main.tf",
+                        mime="text/plain",
+                        use_container_width=True,
+                    )
+                else:
+                    st.button(
+                        "Terraform 코드 없음",
+                        disabled=True,
+                        use_container_width=True,
+                    )
+            with dl_col2:
+                if cf_code:
+                    st.download_button(
+                        "CloudFormation(YAML) 다운로드",
+                        data=cf_code.encode("utf-8"),
+                        file_name="cloudformation_template.yaml",
+                        mime="text/yaml",
+                        use_container_width=True,
+                    )
+                else:
+                    st.button(
+                        "CloudFormation 코드 없음",
+                        disabled=True,
+                        use_container_width=True,
+                    )
 
             st.markdown("---")
             st.subheader("📖 설정 가이드")
             setup = arch.get("setup_guide", {})
-            
+
             with st.expander("AWS 콘솔에서 직접 만들기 (클릭해서 펼치기)"):
                 for i, step in enumerate(setup.get("console_steps", []), 1):
                     st.write(f"**{i}.** {step}")
@@ -206,18 +339,64 @@ with col_right:
                 for cmd in setup.get("cli_examples", []):
                     st.code(cmd, language="bash")
 
-        # --- 탭 3: JSON ---
+            # 🔹 boto3 자동 배포 데모 코드 (실행 X, 발표용 코드만)
+            with st.expander("🧪 (데모 코드) boto3로 자동 배포하기"):
+                st.write(
+                    "실제 AWS 계정에 리소스를 생성하는 예시 코드입니다. "
+                    "발표에서 '이렇게 확장할 수 있다'를 설명하는 용도로 사용할 수 있습니다."
+                )
+                st.code(BOTO3_DEPLOY_EXAMPLE, language="python")
+                st.caption(
+                    "※ 실제로 사용하려면 IAM 권한, 과금, 리소스 삭제 전략을 반드시 검토해야 합니다."
+                )
+
+        # ─────────────────────────────────────
+        # 탭 3: 원본 JSON
+        # ─────────────────────────────────────
         with tab3:
             st.subheader("🔍 디버깅용 원본 JSON")
             st.json(arch)
 
+        # ─────────────────────────────────────
+        # 탭 4: 패턴 비교
+        # ─────────────────────────────────────
+        with tab4:
+            st.subheader("📈 다른 패턴과 비교")
+
+            selected_id = arch.get("selected_pattern_id")
+            if not selected_id:
+                st.info("선택된 패턴 ID가 없어 패턴 비교를 할 수 없습니다.")
+            else:
+                for p in AWS_PATTERNS:
+                    is_selected = p.get("id") == selected_id
+                    title = f"✅ {p['name']}" if is_selected else p["name"]
+                    st.markdown(f"### {title}")
+
+                    when = p.get("when", {})
+                    st.write(f"- **트래픽 전제:** {when.get('traffic')}")
+                    st.write(f"- **응답 지연 요구:** {when.get('latency')}")
+                    st.write(f"- **예산 특성:** {when.get('budget')}")
+                    st.write(f"- **운영 팀 규모:** {when.get('ops_team')}")
+
+                    st.write(f"- **장점:** {', '.join(p.get('pros', []))}")
+                    st.write(f"- **단점:** {', '.join(p.get('cons', []))}")
+
+                    cost_hint = p.get("cost_hint")
+                    if cost_hint:
+                        st.write(
+                            f"- **대략적인 비용 범위:** {cost_hint.get('monthly_base')}"
+                        )
+
+                    st.markdown("---")
+
     else:
-        # 결과가 없을 때 보여줄 플레이스홀더
-        st.info("👈 왼쪽에서 서비스 내용을 입력하고 '분석 시작'을 눌러주세요.")
-        st.markdown("""
+        st.info("👈 왼쪽에서 서비스 내용을 입력하고 '요구사항 분석 시작'을 눌러주세요.")
+        st.markdown(
+            """
         **사용 가이드:**
         1. 만들고 싶은 서비스를 왼쪽 입력창에 적습니다.
-        2. [요구사항 분석] 버튼을 누릅니다.
-        3. 필요하다면 추가 질문에 답하고 [아키텍처 설계] 버튼을 누릅니다.
-        4. 오른쪽에서 설계된 아키텍처와 코드를 확인합니다.
-        """)
+        2. `🔍 요구사항 분석 시작` 버튼을 누릅니다.
+        3. 필요하다면 추가 질문에 답하고 `아키텍처 설계` 버튼을 누릅니다.
+        4. 오른쪽에서 설계된 아키텍처, 비용 힌트, IaC 코드 및 비교 결과를 확인합니다.
+        """
+        )
