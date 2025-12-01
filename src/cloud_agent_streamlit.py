@@ -4,12 +4,14 @@ import json
 import io
 import streamlit as st
 
+
 from cloud_agent import (
     create_agents,
     analyze_requirements,
     recommend_architecture,
 )
 from aws_patterns import AWS_PATTERNS  # 패턴 메타데이터(비용/비교용)
+from infra_deploy import DEPLOYERS
 
 # ─────────────────────────────────────────────────────────────
 # 0. (발표용) boto3 자동 배포 데모 코드 문자열
@@ -339,16 +341,65 @@ with col_right:
                 for cmd in setup.get("cli_examples", []):
                     st.code(cmd, language="bash")
 
-            # 🔹 boto3 자동 배포 데모 코드 (실행 X, 발표용 코드만)
-            with st.expander("🧪 (데모 코드) boto3로 자동 배포하기"):
-                st.write(
-                    "실제 AWS 계정에 리소스를 생성하는 예시 코드입니다. "
-                    "발표에서 '이렇게 확장할 수 있다'를 설명하는 용도로 사용할 수 있습니다."
+            # 🔹 실제 AWS에 데모로 배포하는 버튼 (선택 기능)
+        st.markdown("---")
+        st.subheader("🚀 실제 AWS 계정에 데모로 배포해 보기")
+
+        st.caption(
+            "※ 과금 / 리소스 정리를 직접 책임질 수 있을 때만 사용하세요.\n"
+            "   학교 과제 데모용으로 S3 + DynamoDB 정도만 생성합니다."
+        )
+
+        selected_pattern_id = arch.get("selected_pattern_id")
+
+        if not selected_pattern_id or selected_pattern_id not in DEPLOYERS:
+            st.warning(
+                "이 패턴은 아직 자동 배포 함수가 연결되지 않았습니다. "
+                "현재는 `소규모 서버리스 웹 서비스` 패턴만 데모 지원합니다."
+            )
+        else:
+            # 프로젝트 이름 & 리전 선택
+            proj_col, region_col = st.columns(2)
+            with proj_col:
+                project_name = st.text_input(
+                    "프로젝트 이름 (리소스 이름 prefix)",
+                    value="demo-project",
+                    help="예: smart-kitchen, club-board 등. S3 버킷 이름에 들어갑니다.",
                 )
-                st.code(BOTO3_DEPLOY_EXAMPLE, language="python")
-                st.caption(
-                    "※ 실제로 사용하려면 IAM 권한, 과금, 리소스 삭제 전략을 반드시 검토해야 합니다."
+            with region_col:
+                region = st.selectbox(
+                    "배포 리전 선택",
+                    options=[
+                        "ap-northeast-2",  # 서울
+                        "ap-northeast-1",  # 도쿄
+                        "us-east-1",
+                    ],
+                    index=0,
                 )
+
+            if st.button(
+                "⚠️ 이 패턴으로 실제 AWS에 데모 리소스 생성하기",
+                type="primary",
+                use_container_width=True,
+            ):
+                if not project_name.strip():
+                    st.error("프로젝트 이름을 입력해주세요.")
+                else:
+                    deploy_fn = DEPLOYERS[selected_pattern_id]
+                    with st.spinner("boto3로 AWS 리소스를 생성하는 중입니다..."):
+                        try:
+                            result = deploy_fn(project_name.strip(), region)
+                            st.success("✅ 데모 리소스 생성 요청을 완료했습니다.")
+                            st.write("생성/시도 결과 로그:")
+                            for line in result.get("logs", []):
+                                st.text(line)
+                            st.info(
+                                "AWS 콘솔에서 S3 / DynamoDB에 들어가 "
+                                f"`{result.get('bucket_name')}` / "
+                                f"`{result.get('table_name')}` 리소스를 확인해 보세요."
+                            )
+                        except Exception as e:
+                            st.error(f"리소스 생성 중 오류가 발생했습니다: {e}")
 
         # ─────────────────────────────────────
         # 탭 3: 원본 JSON
