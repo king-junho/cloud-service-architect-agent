@@ -28,23 +28,26 @@
 - AWS 패턴 룰베이스(AWS_PATTERNS) 내장
 
 ## ⚙️ 사용 방법
-<img width="1583" height="1246" alt="1단계 버튼 누름" src="https://github.com/user-attachments/assets/17dbb3ea-91a3-4e55-bdd6-b5db6eb0d696" />
+<img width="1750" height="1062" alt="1단계" src="https://github.com/user-attachments/assets/b14479c1-efb1-4ed5-9376-ff41f006ac44" />
 사용자는 만들고 싶은 서비스를 예시에서 가져오거나 또는 직접 설명을 입력할 수 있습니다.
 
-<img width="1667" height="1394" alt="1단계" src="https://github.com/user-attachments/assets/38532e90-d10a-4179-9220-90b37153fbc1" />
-버튼 클릭 시 사용자가 입력한 정보에 맞춰서 요구사항이 요약되어 보여지며 추가 정보가 필요할 시 추가 질문을 통해서 사용자가 원하는 페이지를 잘 만들 수 있도록 도와줍니다.
+<img width="1676" height="1132" alt="1단계 버튼누름" src="https://github.com/user-attachments/assets/a97c32d4-66db-4267-97c8-8dd0f093aad6" />
+분석 시작 버튼 클릭 시 사용자가 입력한 정보에 맞춰서 요구사항이 요약되어 보여지며 추가 정보가 필요할 시 추가 질문을 통해서 사용자가 원하는 페이지를 잘 만들 수 있도록 도와줍니다.
 
-<img width="1447" height="1337" alt="2단계1" src="https://github.com/user-attachments/assets/ac15f01c-509f-4d78-bdfe-d891ee2de753" />
-<img width="1722" height="871" alt="2단계2" src="https://github.com/user-attachments/assets/a181c490-2b8d-44fe-a54d-c49368409bda" />
-2단계 버튼 클릭 시 추천하는 아키텍처 패턴을 보여줍니다. 이 때 패턴의 사용 서비스 및 역할, 다이어그램, 장점과 단점을 같이 알려줍니다.
+<img width="946" height="932" alt="2-1" src="https://github.com/user-attachments/assets/0f556f37-6c0c-4858-8444-aaa4c83692cf" />
+<img width="995" height="997" alt="2-2" src="https://github.com/user-attachments/assets/0597f3a4-a0ff-4c72-9749-a9f3efaab9e5" />
+설계 실행 버튼 클릭 시 추천하는 아키텍처 패턴을 보여줍니다. 이 때 패턴의 핵심 서비스 및 구조도, 장점과 주의사항, 비용 가이드를 같이 알려줍니다.
 
-<img width="2677" height="1291" alt="2단계 3" src="https://github.com/user-attachments/assets/ff98c288-749e-4dad-9718-a2c4094852f6" />
-세팅 가이드를 선택할 시 사용자가 어떤 순서에 따라서 만들어야 하는지에 대해 순서를 알려줍니다. 이 떄 aws cli를 사용해서 만드는 방법 또한 같이 알려줍니다.
+<img width="960" height="1123" alt="2-3" src="https://github.com/user-attachments/assets/d34b9b02-7e2b-47cb-8fa3-9886cc630f15" />
+<img width="924" height="479" alt="2-4" src="https://github.com/user-attachments/assets/db40954e-b19d-4a8b-abb8-28b8433f0344" />
+사용자는 IaC 코드를 확인하고 다운로드 할 수 있으며 밑의 가이드를 통해서 어떻게 해야 할지 더욱 자세하게 알 수 있습니다
 
-<img width="2661" height="1300" alt="2단계 4" src="https://github.com/user-attachments/assets/0a07e360-db38-4fa0-a3e0-0b9ac1f53c38" />
-<img width="2679" height="785" alt="2단계 6" src="https://github.com/user-attachments/assets/a45cfa52-21f9-4f46-bdac-edcd64fdba7e" />
-<img width="2751" height="1310" alt="2단계 7" src="https://github.com/user-attachments/assets/32272340-f397-467b-85b5-19cfbb516212" />
-원한다면 사용자는 IaC 코드, 또는 Raw Json 파일을 확인해볼 수 있습니다.
+<img width="950" height="1179" alt="2-5" src="https://github.com/user-attachments/assets/ae4b3356-a776-449d-aa83-206e7336384b" />
+사용자는 원본 Json 파일을 확인하고 이를 참고할 수도 있습니다.
+
+<img width="1069" height="1326" alt="2-7" src="https://github.com/user-attachments/assets/26eb0d15-a521-450e-8317-015358826fa3" />
+<img width="918" height="927" alt="2-6" src="https://github.com/user-attachments/assets/3d0ee74f-1088-4ab5-b5c7-d5a0ee4b703a" />
+다른 패턴과의 비교를 통해서 왜 이러한 패턴을 사용해야 하는지 알 수 있습니다.
 
 
 ## 💡 예시 시나리오
@@ -80,3 +83,4 @@ IaC 예시:
 - S3 버킷
 - Glue DB
 - Athena WorkGroup
+
